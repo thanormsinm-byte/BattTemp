@@ -123,15 +123,23 @@ void setup() {
   lcd.clear();
   lcd.backlight(); 
   lcd.setCursor(0, 0); lcd.print("--- SYSTEM BOOT ---");
-  lcd.setCursor(0, 1); lcd.print("   Hardware Init.");
+  lcd.setCursor(0, 1); lcd.print("    Hardware Init.");
   
   pinMode(LedHeartBeat, OUTPUT); 
   pinMode(ledPin, OUTPUT); 
   pinMode(configButton, INPUT_PULLUP);
 
+  // --- จุดที่แก้ไข: กระตุ้นการอ่านค่า WiFi จาก Memory ---
   WiFi.mode(WIFI_STA);
-  WiFi.begin();
-  delay(300);
+  WiFi.begin(); // เริ่มการเชื่อมต่อเบื้องต้นเพื่อโหลดค่า SSID เดิมขึ้นมา
+  
+  // รอสักครู่ให้ Driver โหลดค่า SSID สำเร็จก่อนดึงมาแสดงผล
+  int retry = 0;
+  while (WiFi.SSID() == "" && retry < 10) { 
+    delay(100); 
+    retry++; 
+  }
+  // ------------------------------------------------
 
   macAddrStr = getEfuseMac();
   uint64_t mac = ESP.getEfuseMac();
@@ -145,7 +153,7 @@ void setup() {
   
   lcd.setCursor(0, 2); lcd.print("Connect to WiFi...");
 
-   lcd.setCursor(0, 3);
+  lcd.setCursor(0, 3);
   String targetSSID = WiFi.SSID(); 
   if (targetSSID != "") {
     lcd.print("SSID: " + targetSSID.substring(0, 14));
@@ -161,6 +169,11 @@ void setup() {
     lcd.setCursor(0, 0); lcd.print("--- CONFIG MODE ---");
     lcd.setCursor(0, 1); lcd.print("1.Connect WiFi Name");
     lcd.setCursor(0, 2); lcd.print(">> " + fullHostname); 
+    
+    for(int i=0; i<3; i++) {
+      lcd.setCursor(0, 3); lcd.print("2.Open: 192.168.4.1"); delay(500);
+      lcd.setCursor(8, 3); lcd.print("           "); delay(500);
+    }
     lcd.setCursor(0, 3); lcd.print("2.Open: 192.168.4.1");
   });
 
