@@ -16,6 +16,7 @@
 #include <Update.h> 
 #include <Wire.h> 
 #include <LiquidCrystal_I2C.h>
+#include <esp_task_wdt.h> // เพิ่มบรรทัดนี้เพื่อแก้ Error WDT
 
 // --- [ ส่วนที่ 1: การตั้งค่าบอร์ด ] ---
 String boardList[] = {"4948", "4A90", "59EC", "G7H8", "I9J0", "K1L2", "M3N4", "O5P6"};
@@ -67,21 +68,90 @@ String getSharedHTML(bool isUpdatePage) {
   return html;
 }
 
+// --- [ ส่วนที่ปรับปรุง: แก้ไขจุดไข่ปลาล้นหน้าจอ + ป้องกัน WDT Restart ] ---
+void update_progress(int cur, int total) {
+  static int dotCount = 0;
+  static unsigned long lastUpdate = 0;
+  
+  // Feed Watchdog Timer เพื่อไม่ให้เครื่อง Restart ขณะอัปเดต
+  esp_task_wdt_reset(); 
+  yield(); 
+
+  if (millis() - lastUpdate > 500) {
+    lastUpdate = millis();
+    dotCount++;
+    
+    // ถ้าจุดเกิน 11 ให้กลับไปเริ่มที่ 0 ใหม่
+    if (dotCount > 12) dotCount = 0; 
+    
+    // 1. ย้าย Cursor ไปที่ตำแหน่งต่อจากคำว่า Updating (index 8)
+    lcd.setCursor(8, 3); 
+    
+    // 2. พิมพ์ช่องว่างเพื่อล้างจุดเก่าออกทั้งหมดก่อน
+    lcd.print("            "); 
+    
+    // 3. ย้าย Cursor กลับไปที่เดิมเพื่อพิมพ์จุดชุดใหม่
+    lcd.setCursor(8, 3);
+    String dots = "";
+    for (int i = 0; i < dotCount; i++) {
+      dots += ".";
+    }
+    lcd.print(dots);
+  }
+}
+
 void checkGitHubUpdate() {
   if (WiFi.status() != WL_CONNECTED) return;
-  WiFiClientSecure client; client.setInsecure(); HTTPClient http;
+  WiFiClientSecure client; 
+  client.setInsecure(); 
+  HTTPClient http;
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   http.begin(client, versionURL);
-  if (http.GET() == HTTP_CODE_OK) { 
+  int httpCode = http.GET();
+  
+  if (httpCode == HTTP_CODE_OK) { 
     String payload = http.getString();
-    int verPos = payload.indexOf("\"version\":");
-    if (verPos != -1) {
-      float newVer = payload.substring(payload.indexOf("\"", verPos+10)+1, payload.indexOf("\"", verPos+23)).toFloat();
-      if (newVer > currentVersion) {
-        lcd.clear(); lcd.setCursor(0, 0); lcd.print("    ----OTA----");
-        lcd.setCursor(0, 3); lcd.print("Updating..."); 
+    int verKeyPos = payload.indexOf("\"version\":");
+    
+    if (verKeyPos != -1) {
+      int firstQuote = payload.indexOf("\"", verKeyPos + 10); 
+      int secondQuote = payload.indexOf("\"", firstQuote + 1);
+      String newVerStr = payload.substring(firstQuote + 1, secondQuote);
+      float newVersion = newVerStr.toFloat();
+   
+      int buildKeyPos = payload.indexOf("\"Build\":");
+      String buildDate = "N/A";
+      if (buildKeyPos != -1) {
+        int bFirstQuote = payload.indexOf("\"", buildKeyPos + 8);
+        int bSecondQuote = payload.indexOf("\"", bFirstQuote + 1);
+        buildDate = payload.substring(bFirstQuote + 1, bSecondQuote);
+      }
+
+      Serial.print("\n[OTA] Curr("); Serial.print(currentVersion, 1);
+      Serial.print(") <--> Last("); Serial.print(newVersion, 1);
+      Serial.println(")");
+
+      if (newVersion > currentVersion) {
+        Serial.println("[OTA] >>> Found New Fw. <<<");
+        
+        // --- ส่วนที่ปรับปรุง: การแสดงผล LCD ก่อนเริ่ม Update ---
+        lcd.clear();
+        lcd.setCursor(0, 0); lcd.print("    ----OTA----");
+        lcd.setCursor(0, 1); lcd.print("Ver.:" + String(newVersion, 1));
+        lcd.setCursor(0, 2); lcd.print("Bld.:" + buildDate);
+        lcd.setCursor(0, 3); lcd.print("Updating"); 
+
+        httpUpdate.onProgress(update_progress);
         httpUpdate.rebootOnUpdate(true);
-        httpUpdate.update(client, firmwareURL);
+        
+        t_httpUpdate_return ret = httpUpdate.update(client, firmwareURL);
+      
+        if (ret == HTTP_UPDATE_FAILED) {
+          Serial.printf("[OTA] Update Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
+          lcd.setCursor(0, 3); lcd.print("Update Failed!      ");
+        }
+      } else {
+        Serial.println("[OTA] Fw. is up to date.");
       }
     }
   }
