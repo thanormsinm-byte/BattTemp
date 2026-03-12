@@ -25,7 +25,7 @@ String myMacSuffix = "";
 char auth[] = "yXTSHdXVnNyDihE9zrzxQGE2JosxAQaa";
 
 // --- [ ส่วนที่ 2: ระบบ Update & Web ] ---
-float currentVersion = 1.1; 
+float currentVersion = 1.4; 
 const String versionURL = "https://raw.githubusercontent.com/thanormsinm-byte/BattTemp/main/version.json";
 const String firmwareURL = "https://raw.githubusercontent.com/thanormsinm-byte/BattTemp/main/Batt.bin";
 WebServer server(80);
@@ -144,6 +144,9 @@ void checkGitHubUpdate() {
           Serial.printf("[OTA] Update Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
           lcd.setCursor(0, 3); lcd.print("Update Failed!      ");
         }
+      }else
+      {
+        Serial.println("[OTA] Firmware is up to date.");
       }
     }
   }
@@ -295,6 +298,7 @@ void loop() {
     if(temperatureC == -127.00) { 
       lcd.print("Error"); 
     } else { 
+      
       lcd.print(temperatureC, 1); lcd.print((char)223); lcd.print("C");
       lcd.setCursor(0, 2);
       if (temperatureC >= 10.0 && temperatureC <= 34.9) {
@@ -310,11 +314,22 @@ void loop() {
         lcd.print("Status: Low Temp");
       }
     }
+    
   } else if (displayPage == 2) { 
     lcd.setCursor(0, 0); lcd.print("Blynk:"); lcd.print((isOnline && Blynk.connected()) ? "Connected" : " Error");
     if (isOnline) {
       lcd.setCursor(0, 1); lcd.print("WiFi :"); lcd.print(WiFi.SSID().substring(0,12));
       lcd.setCursor(0, 2); lcd.print("IP   :"); lcd.print(WiFi.localIP().toString());
+
+      // --- ส่วนที่เพิ่มเข้าไปใหม่ตามคำขอ ---
+      // เช็ค Update อัตโนมัติเมื่อหน้าจอวนมาหน้านี้และออนไลน์
+      static unsigned long lastAutoCheck = 0;
+      if (millis() - lastAutoCheck > 60000) { // ป้องกันการเช็ครัวเกินไป (เช็คซ้ำได้ทุก 1 นาที)
+        checkGitHubUpdate();
+        lastAutoCheck = millis();
+      }
+      // ----------------------------------
+      
     } else {
       lcd.setCursor(0, 1); lcd.print("WiFi : Disconnected");
     }
