@@ -1,6 +1,7 @@
 #define BLYNK_TEMPLATE_ID    "Legacy"
 #define BLYNK_TEMPLATE_NAME "Legacy"
 #define BLYNK_PRINT Serial
+
 #include <WiFi.h>
 #include <WiFiManager.h> 
 #include <BlynkSimpleEsp32.h> 
@@ -15,30 +16,26 @@
 #include <Update.h> 
 #include <Wire.h> 
 #include <LiquidCrystal_I2C.h>
-#include <esp_task_wdt.h> // --- [ เพิ่มส่วน WDT ] ---
 
-// --- [ ส่วนที่ 1: รายชื่อ 8 บอร์ด ] ---
+// --- [ ส่วนที่ 1: การตั้งค่าบอร์ด ] ---
 String boardList[] = {"4948", "4A90", "59EC", "G7H8", "I9J0", "K1L2", "M3N4", "O5P6"};
 int myID = 0; 
 String myMacSuffix = ""; 
-
-// --- [ ส่วนที่ 2: ข้อมูลการเชื่อมต่อ ] ---
 char auth[] = "yXTSHdXVnNyDihE9zrzxQGE2JosxAQaa";
+
+// --- [ ส่วนที่ 2: ระบบ Update & Web ] ---
+float currentVersion = 1.4; 
+const String versionURL = "https://raw.githubusercontent.com/thanormsinm-byte/BattTemp/main/version.json";
+const String firmwareURL = "https://raw.githubusercontent.com/thanormsinm-byte/BattTemp/main/Batt.bin";
 WebServer server(80);
 HTTPUpdateServer httpUpdater;
 bool isOnline = false; 
 
-// --- [ ส่วนที่ 3: GitHub Update Configuration ] ---
-float currentVersion = 1.4; 
-const String versionURL = "https://raw.githubusercontent.com/thanormsinm-byte/BattTemp/main/version.json";
-const String firmwareURL = "https://raw.githubusercontent.com/thanormsinm-byte/BattTemp/main/Batt.bin";
-
-// --- [ ส่วนที่ 4: ฮาร์ดแวร์ ] ---
+// --- [ ส่วนที่ 3: ฮาร์ดแวร์ ] ---
 const int oneWireBus = 5;       
 const int LedHeartBeat = 2; 
 const int ledPin = 4;        
 const int configButton = 0; 
-
 OneWire oneWire(oneWireBus);
 DallasTemperature sensors(&oneWire);
 LiquidCrystal_I2C lcd(0x27, 20, 4); 
@@ -49,165 +46,7 @@ bool blinkState = false;
 String fullHostname = "";
 String macAddrStr = "";
 
-// --- [ หน้าเว็บ UI V5.0: Shared UI for Root & Update ] ---
-String getSharedHTML(bool isUpdatePage) {
-  String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1'>";
-  html += "<style>";
-  html += "body { font-family: sans-serif; text-align: center; color: #333; background-color: #fff; margin: 0; padding-top: 50px; }";
-  html += ".container { max-width: 400px; margin: auto; padding: 20px; }";
-  html += ".header { display: flex; align-items: center; justify-content: center; margin-bottom: 35px; }";
-  html += ".logo { width: 32px; height: 32px; background: #000; position: relative; margin-right: 12px; }";
-  html += ".logo::before { content: ''; position: absolute; top: 4px; left: 4px; right: 4px; bottom: 4px; border: 1px solid #fff; }";
-  html += "h2 { font-size: 16px; font-weight: bold; margin: 0; letter-spacing: 1px; }";
-  html += ".upload-area { border: 1.5px solid #e0e0e0; border-radius: 30px; padding: 8px 25px; margin: 0 auto 20px auto; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; font-size: 14px; }";
-  html += ".btn-submit { background: #007bff; color: #fff; border: none; padding: 10px 30px; border-radius: 20px; cursor: pointer; font-size: 13px; display: none; margin: 10px auto 25px auto; font-weight: bold; }";
-  html += ".progress-container { width: 85%; background-color: #f3f3f3; border-radius: 25px; margin: 25px auto 10px auto; display: none; padding: 0px; height: 24px; position: relative; overflow: hidden; }";
-  html += ".progress-bar { width: 0%; height: 100%; background-color: #007bff; border-radius: 25px; transition: width 0.1s; }";
-  html += ".progress-text { position: absolute; width: 100%; top: 0; left: 0; line-height: 24px; font-size: 12px; font-weight: bold; color: #333; }";
-  html += "#status-text { font-size: 12px; color: #007bff; margin-bottom: 35px; display: none; font-weight: bold; }";
-  html += ".settings-group { margin-top: 50px; }"; 
-  html += ".settings-title { font-size: 10px; color: #000; font-weight: bold; margin-bottom: 15px; display: block; letter-spacing: 1px; }";
-  html += "table { width: 100%; border-collapse: collapse; }";
-  html += "td { padding: 12px 5px; border-bottom: 1px solid #cccccc; text-align: left; font-size: 13px; color: #333; }"; 
-  html += ".val { text-align: right; font-weight: bold; color: #f39c12; }"; 
-  html += "input[type='file'] { display: none; }";
-  html += "</style></head><body>";
-  
-  html += "<div class='container'>";
-  html += "<div class='header'><div class='logo'></div><h2>" + String(isUpdatePage ? "UPDATE FIRMWARE" : "SYSTEM DASHBOARD") + "</h2></div>";
-  
-  html += "<form method='POST' action='/update' enctype='multipart/form-data' id='upload_form' onsubmit='startUpdate(event)'>";
-  html += "<label for='file_input' class='upload-area'><span class='upload-icon'>📄</span> " + String(isUpdatePage ? "Select Bin File" : "Choose New Firmware") + "</label>";
-  
-  html += "<input type='file' name='update' id='file_input' accept='.bin' onchange='fileSelected()'>";
-  
-  html += "<input type='submit' class='btn-submit' id='submit_btn' value='Start Update Now'></form>";
-  
-  html += "<div class='progress-container' id='prg_container'><div class='progress-bar' id='prg_bar'></div><div class='progress-text' id='prg_percent'>0%</div></div>";
-  html += "<div id='status-text'>Uploading...</div>";
-  
-  html += "<div class='settings-group'><span class='settings-title'>SETTINGS</span><table>";
-  html += "<tr><td>SSID</td><td class='val'>" + WiFi.SSID() + "</td></tr>";
-  html += "<tr><td>IP Address</td><td class='val'>" + WiFi.localIP().toString() + "</td></tr>";
-  html += "<tr><td>Hardware ID</td><td class='val'>" + fullHostname + "</td></tr>";
-  html += "<tr><td>Firmware Version</td><td class='val'>" + String(currentVersion, 1) + "</td></tr>";
-  html += "</table></div></div>";
-  
-  html += "<script>";
-  html += "function fileSelected() {";
-  html += "  var fileInput = document.getElementById('file_input');";
-  html += "  var filePath = fileInput.value;";
-  html += "  var allowedExtensions = /(\\.bin)$/i;";
-  html += "  if(!allowedExtensions.exec(filePath)) {";
-  html += "    alert('กรุณาเลือกไฟล์นามสกุล .bin เท่านั้น!');";
-  html += "    fileInput.value = '';";
-  html += "    document.getElementById('submit_btn').style.display = 'none';";
-  html += "    return false;";
-  html += "  } else {";
-  html += "    if(fileInput.files.length > 0) document.getElementById('submit_btn').style.display = 'block';";
-  html += "  }";
-  html += "}";
-
-  html += "function startUpdate(e) { e.preventDefault(); var form = document.getElementById('upload_form'); var data = new FormData(form); var xhr = new XMLHttpRequest();";
-  html += "document.getElementById('submit_btn').style.display = 'none'; document.getElementById('prg_container').style.display = 'block'; document.getElementById('status-text').style.display = 'block';";
-  html += "xhr.upload.addEventListener('progress', function(evt) { if (evt.lengthComputable) { var per = Math.round((evt.loaded / evt.total) * 100);";
-  html += "document.getElementById('prg_bar').style.width = per + '%'; document.getElementById('prg_percent').innerText = per + '%';";
-  html += "if(per >= 100) { document.getElementById('status-text').innerText = 'Processing...'; }";
-  html += "} }, false);";
-  html += "xhr.onload = function() { if(xhr.status === 200) { document.getElementById('status-text').innerHTML = 'Update Success! Restarting...'; setTimeout(function() { window.location.href='/'; }, 5000); } else { document.getElementById('status-text').innerText = 'Update Failed!'; } };";
-  html += "xhr.open('POST', '/update'); xhr.send(data); }</script></body></html>";
-  return html;
-}
-
-// --- [ ส่วนที่ปรับปรุง: แก้ไขจุดไข่ปลาล้นหน้าจอ + ป้องกัน WDT Restart ] ---
-void update_progress(int cur, int total) {
-  static int dotCount = 0;
-  static unsigned long lastUpdate = 0;
-  
-  // Feed Watchdog Timer เพื่อไม่ให้เครื่อง Restart ขณะอัปเดต
-  esp_task_wdt_reset(); 
-  yield(); 
-
-  if (millis() - lastUpdate > 500) {
-    lastUpdate = millis();
-    dotCount++;
-    
-    // ถ้าจุดเกิน 11 ให้กลับไปเริ่มที่ 0 ใหม่
-    if (dotCount > 12) dotCount = 0; 
-    
-    // 1. ย้าย Cursor ไปที่ตำแหน่งต่อจากคำว่า Updating (index 8)
-    lcd.setCursor(8, 3); 
-    
-    // 2. พิมพ์ช่องว่างเพื่อล้างจุดเก่าออกทั้งหมดก่อน
-    lcd.print("            "); 
-    
-    // 3. ย้าย Cursor กลับไปที่เดิมเพื่อพิมพ์จุดชุดใหม่
-    lcd.setCursor(8, 3);
-    String dots = "";
-    for (int i = 0; i < dotCount; i++) {
-      dots += ".";
-    }
-    lcd.print(dots);
-  }
-}
-
-void checkGitHubUpdate() {
-  if (WiFi.status() != WL_CONNECTED) return;
-  WiFiClientSecure client; 
-  client.setInsecure(); 
-  HTTPClient http;
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.begin(client, versionURL);
-  int httpCode = http.GET();
-  
-  if (httpCode == HTTP_CODE_OK) { 
-    String payload = http.getString();
-    int verKeyPos = payload.indexOf("\"version\":");
-    
-    if (verKeyPos != -1) {
-      int firstQuote = payload.indexOf("\"", verKeyPos + 10); 
-      int secondQuote = payload.indexOf("\"", firstQuote + 1);
-      String newVerStr = payload.substring(firstQuote + 1, secondQuote);
-      float newVersion = newVerStr.toFloat();
-   
-      int buildKeyPos = payload.indexOf("\"Build\":");
-      String buildDate = "N/A";
-      if (buildKeyPos != -1) {
-        int bFirstQuote = payload.indexOf("\"", buildKeyPos + 8);
-        int bSecondQuote = payload.indexOf("\"", bFirstQuote + 1);
-        buildDate = payload.substring(bFirstQuote + 1, bSecondQuote);
-      }
-
-      Serial.print("\n[OTA] Curr("); Serial.print(currentVersion, 1);
-      Serial.print(") <--> Last("); Serial.print(newVersion, 1);
-      Serial.println(")");
-
-      if (newVersion > currentVersion) {
-        Serial.println("[OTA] >>> Found New Fw. <<<");
-        
-        // --- ส่วนที่ปรับปรุง: การแสดงผล LCD ก่อนเริ่ม Update ---
-        lcd.clear();
-        lcd.setCursor(0, 0); lcd.print("    ----OTA----");
-        lcd.setCursor(0, 1); lcd.print("Ver.:" + String(newVersion, 1));
-        lcd.setCursor(0, 2); lcd.print("Bld.:" + buildDate);
-        lcd.setCursor(0, 3); lcd.print("Updating"); 
-
-        httpUpdate.onProgress(update_progress);
-        httpUpdate.rebootOnUpdate(true);
-        
-        t_httpUpdate_return ret = httpUpdate.update(client, firmwareURL);
-      
-        if (ret == HTTP_UPDATE_FAILED) {
-          Serial.printf("[OTA] Update Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
-          lcd.setCursor(0, 3); lcd.print("Update Failed!      ");
-        }
-      } else {
-        Serial.println("[OTA] Fw. is up to date.");
-      }
-    }
-  }
-  http.end();
-}
+// --- [ ส่วนที่ 4: ฟังก์ชันเสริม (Helper Functions) ] ---
 
 String getEfuseMac() {
   uint64_t mac = ESP.getEfuseMac(); char macBuf[18];
@@ -215,26 +54,65 @@ String getEfuseMac() {
   return String(macBuf);
 }
 
+String getSharedHTML(bool isUpdatePage) {
+  String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1'>";
+  html += "<style>body { font-family: sans-serif; text-align: center; color: #333; margin: 0; padding-top: 50px; }";
+  html += ".container { max-width: 400px; margin: auto; padding: 20px; } h2 { font-size: 16px; font-weight: bold; }";
+  html += ".upload-area { border: 1.5px solid #e0e0e0; border-radius: 30px; padding: 8px 25px; cursor: pointer; display: inline-flex; }";
+  html += "table { width: 100%; margin-top: 30px; border-collapse: collapse; } td { padding: 10px; border-bottom: 1px solid #eee; text-align: left; font-size: 13px; }";
+  html += ".val { text-align: right; font-weight: bold; color: #f39c12; } </style></head><body>";
+  html += "<div class='container'><h2>" + String(isUpdatePage ? "UPDATE FIRMWARE" : "SYSTEM DASHBOARD") + "</h2>";
+  html += "<table><tr><td>SSID</td><td class='val'>" + WiFi.SSID() + "</td></tr><tr><td>IP</td><td class='val'>" + WiFi.localIP().toString() + "</td></tr>";
+  html += "<tr><td>ID</td><td class='val'>" + fullHostname + "</td></tr><tr><td>Ver</td><td class='val'>" + String(currentVersion, 1) + "</td></tr></table></div></body></html>";
+  return html;
+}
+
+void checkGitHubUpdate() {
+  if (WiFi.status() != WL_CONNECTED) return;
+  WiFiClientSecure client; client.setInsecure(); HTTPClient http;
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  http.begin(client, versionURL);
+  if (http.GET() == HTTP_CODE_OK) { 
+    String payload = http.getString();
+    int verPos = payload.indexOf("\"version\":");
+    if (verPos != -1) {
+      float newVer = payload.substring(payload.indexOf("\"", verPos+10)+1, payload.indexOf("\"", verPos+23)).toFloat();
+      if (newVer > currentVersion) {
+        lcd.clear(); lcd.setCursor(0, 0); lcd.print("    ----OTA----");
+        lcd.setCursor(0, 3); lcd.print("Updating..."); 
+        httpUpdate.rebootOnUpdate(true);
+        httpUpdate.update(client, firmwareURL);
+      }
+    }
+  }
+  http.end();
+}
+
+// --- [ ส่วนที่ 5: ฟังก์ชันหลักของระบบ ] ---
+
 void startWiFiManager() {
-  esp_task_wdt_delete(NULL); 
+  server.stop(); 
+  delay(500); 
 
   lcd.clear(); 
   lcd.setCursor(0, 0); lcd.print("--- CHANGE WIFI ---");
-  lcd.setCursor(0, 1); lcd.print("1.Connect WiFi Name"); // บอกขั้นตอนที่ 1
-  lcd.setCursor(0, 2); lcd.print(">> " + fullHostname);  // ชื่อ WiFi ที่ต้องเกาะ
-  lcd.setCursor(0, 3); lcd.print("2.Open: 192.168.4.1"); // บอกขั้นตอนที่ 2
+  lcd.setCursor(0, 1); lcd.print("1.Connect WiFi Name");
+  lcd.setCursor(0, 2); lcd.print(">> " + fullHostname); 
+
+  // กระพริบ IP 
+  for(int i=0; i<3; i++) {
+    lcd.setCursor(0, 3); lcd.print("2.Open: 192.168.4.1"); delay(500);
+    lcd.setCursor(8, 3); lcd.print("           "); delay(500);
+  }
+  lcd.setCursor(0, 3); lcd.print("2.Open: 192.168.4.1");
   
   WiFiManager wm; 
-  wm.setCaptivePortalEnable(true); 
   wm.setConfigPortalTimeout(180); 
   
-  server.stop();
-  
-  if (!wm.startConfigPortal(fullHostname.c_str())) { 
-    delay(500); 
+  if (!wm.startConfigPortal(fullHostname.c_str())) {
+    delay(1000);
   }
-  
-  ESP.restart();
+  ESP.restart(); 
 }
 
 void setup() {
@@ -242,9 +120,10 @@ void setup() {
   Serial.println("--- SYSTEM BOOT ---");
   
   lcd.begin(); 
+  lcd.clear();
   lcd.backlight(); 
   lcd.setCursor(0, 0); lcd.print("--- SYSTEM BOOT ---");
-  lcd.setCursor(0, 1); lcd.print("    Hardware Int.");
+  lcd.setCursor(0, 1); lcd.print("   Hardware Init.");
   
   pinMode(LedHeartBeat, OUTPUT); 
   pinMode(ledPin, OUTPUT); 
@@ -255,80 +134,59 @@ void setup() {
   delay(300);
 
   macAddrStr = getEfuseMac();
-  uint64_t mac = ESP.getEfuseMac(); char hexStr[5];
+  uint64_t mac = ESP.getEfuseMac();
+  char hexStr[5];
   sprintf(hexStr, "%02X%02X", (uint8_t)(mac >> 32), (uint8_t)(mac >> 40)); 
   myMacSuffix = String(hexStr);
-
-  for (int i = 0; i < 8; i++) {
-    if (myMacSuffix.equalsIgnoreCase(boardList[i])) { myID = i + 1; break; }
-  }
+  
+  for (int i = 0; i < 8; i++) { if (myMacSuffix.equalsIgnoreCase(boardList[i])) { myID = i + 1; break; } }
   
   fullHostname = (myID > 0 ? String(myID) : "N/A") + "-Batt-" + myMacSuffix;
+  
   lcd.setCursor(0, 2); lcd.print("Connect to WiFi...");
 
-  lcd.setCursor(0, 3);
+   lcd.setCursor(0, 3);
   String targetSSID = WiFi.SSID(); 
   if (targetSSID != "") {
     lcd.print("SSID: " + targetSSID.substring(0, 14));
   } else {
     lcd.print("SSID: Not Found!");
   }
- 
+  
   WiFiManager wm;
   wm.setConfigPortalTimeout(60); 
-
+  
   wm.setAPCallback([](WiFiManager *myWiFiManager) {
     lcd.clear();
     lcd.setCursor(0, 0); lcd.print("--- CONFIG MODE ---");
-    lcd.setCursor(0, 1); lcd.print("1.Connect WiFi Name"); // บอกขั้นตอนที่ 1
-    lcd.setCursor(0, 2); lcd.print(">> " + fullHostname);  // ชื่อ WiFi ที่ต้องเกาะ
-    lcd.setCursor(0, 3); lcd.print("2.Open: 192.168.4.1"); // บอกขั้นตอนที่ 2
+    lcd.setCursor(0, 1); lcd.print("1.Connect WiFi Name");
+    lcd.setCursor(0, 2); lcd.print(">> " + fullHostname); 
+    lcd.setCursor(0, 3); lcd.print("2.Open: 192.168.4.1");
   });
 
   if (wm.autoConnect(fullHostname.c_str())) {
     isOnline = true;
-
-    // --- [ เริ่มต้น Hardware WDT หลังจากเชื่อมต่อ WiFi สำเร็จแล้วเท่านั้น ] ---
-    esp_task_wdt_config_t twdt_config = {
-        .timeout_ms = 8000,           // 8 วินาที
-        .idle_core_mask = (1 << 0),   // Core 0
-        .trigger_panic = true 
-    };
-    esp_task_wdt_init(&twdt_config);
-    esp_task_wdt_add(NULL); 
-    // -------------------------------------------------------------------
-
     ArduinoOTA.setHostname(fullHostname.c_str()); ArduinoOTA.begin();
     Blynk.config(auth, "myplant.ddns.net", 8080); Blynk.connect(); 
 
-    server.on("/", HTTP_GET, []() {
-      server.send(200, "text/html", getSharedHTML(false));
-    });
-
-    server.on("/update", HTTP_GET, []() {
-      server.send(200, "text/html", getSharedHTML(true));
-    });
-
+    server.on("/", HTTP_GET, []() { server.send(200, "text/html", getSharedHTML(false)); });
+    server.on("/update", HTTP_GET, []() { server.send(200, "text/html", getSharedHTML(true)); });
     httpUpdater.setup(&server, "/update"); 
-
     server.begin();
     checkGitHubUpdate();
   }
-  sensors.begin();
+  sensors.begin(); 
   lcd.clear();
 }
 
 void loop() {
-  // --- [ Feed WDT ทุกครั้งที่เริ่ม loop ] ---
-  esp_task_wdt_reset();
-
   if (digitalRead(configButton) == LOW) {
     if (buttonPressTime == 0) buttonPressTime = millis();
-    if (millis() - buttonPressTime > 3000) { startWiFiManager(); }
+    if (millis() - buttonPressTime > 1500) { startWiFiManager(); } 
   } else { buttonPressTime = 0; }
 
   if (WiFi.status() == WL_CONNECTED) {
-    if (!isOnline) { isOnline = true; checkGitHubUpdate(); }
+    if (!isOnline) { isOnline = true; }
     Blynk.run(); ArduinoOTA.handle(); server.handleClient(); 
   } else { isOnline = false; }
 
@@ -336,6 +194,7 @@ void loop() {
   float temperatureC = sensors.getTempCByIndex(0);
   unsigned long currentMillis = millis();
 
+  // ส่งค่าไป Blynk ทุก 2 วินาที
   if (isOnline && (currentMillis - blynkMillis >= 2000)) {
     blynkMillis = currentMillis;
     if (Blynk.connected() && myID > 0) {
@@ -344,16 +203,16 @@ void loop() {
     }
   }
 
+  // ไฟ HeartBeat
   if (currentMillis - blinkMillis >= 500) {
     blinkMillis = currentMillis; blinkState = !blinkState; digitalWrite(LedHeartBeat, blinkState); 
   }
 
+  // สลับหน้าจอ LCD
   unsigned long displayInterval = (displayPage == 1) ? 15000 : 3000;
   if (currentMillis - previousMillis >= displayInterval) {
     previousMillis = currentMillis; 
-    displayPage++;
-    if (displayPage > 2) displayPage = 0; 
-    if (displayPage == 2 && isOnline) { checkGitHubUpdate(); }
+    displayPage = (displayPage > 1) ? 0 : displayPage + 1;
     lcd.clear(); 
   }
 
