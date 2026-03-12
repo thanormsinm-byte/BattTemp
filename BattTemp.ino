@@ -16,7 +16,7 @@
 #include <Update.h> 
 #include <Wire.h> 
 #include <LiquidCrystal_I2C.h>
-#include <esp_task_wdt.h> // เพิ่มบรรทัดนี้เพื่อแก้ Error WDT
+// หมายเหตุ: นำ esp_task_wdt.h ออกเนื่องจากไม่ได้ใช้ระบบ Config WDT แบบเต็มตัว
 
 // --- [ ส่วนที่ 1: การตั้งค่าบอร์ด ] ---
 String boardList[] = {"4948", "4A90", "59EC", "G7H8", "I9J0", "K1L2", "M3N4", "O5P6"};
@@ -25,7 +25,7 @@ String myMacSuffix = "";
 char auth[] = "yXTSHdXVnNyDihE9zrzxQGE2JosxAQaa";
 
 // --- [ ส่วนที่ 2: ระบบ Update & Web ] ---
-float currentVersion = 1.4; 
+float currentVersion = 1.1; 
 const String versionURL = "https://raw.githubusercontent.com/thanormsinm-byte/BattTemp/main/version.json";
 const String firmwareURL = "https://raw.githubusercontent.com/thanormsinm-byte/BattTemp/main/Batt.bin";
 WebServer server(80);
@@ -68,29 +68,22 @@ String getSharedHTML(bool isUpdatePage) {
   return html;
 }
 
-// --- [ ส่วนที่ปรับปรุง: แก้ไขจุดไข่ปลาล้นหน้าจอ + ป้องกัน WDT Restart ] ---
+// --- [ ส่วนที่ปรับปรุง: แก้ไข Error WDT และ Progress Bar ] ---
 void update_progress(int cur, int total) {
   static int dotCount = 0;
   static unsigned long lastUpdate = 0;
   
-  // Feed Watchdog Timer เพื่อไม่ให้เครื่อง Restart ขณะอัปเดต
-  esp_task_wdt_reset(); 
-  yield(); 
+  yield(); // คืนเวลาให้ระบบจัดการ WiFi/Network ป้องกันการหลุดขณะโหลด
 
   if (millis() - lastUpdate > 500) {
     lastUpdate = millis();
     dotCount++;
+    if (dotCount > 11) dotCount = 0; 
     
-    // ถ้าจุดเกิน 11 ให้กลับไปเริ่มที่ 0 ใหม่
-    if (dotCount > 12) dotCount = 0; 
-    
-    // 1. ย้าย Cursor ไปที่ตำแหน่งต่อจากคำว่า Updating (index 8)
+    // ล้างเฉพาะพื้นที่หลังคำว่า Updating (ตำแหน่งที่ 8-20)
     lcd.setCursor(8, 3); 
-    
-    // 2. พิมพ์ช่องว่างเพื่อล้างจุดเก่าออกทั้งหมดก่อน
     lcd.print("            "); 
     
-    // 3. ย้าย Cursor กลับไปที่เดิมเพื่อพิมพ์จุดชุดใหม่
     lcd.setCursor(8, 3);
     String dots = "";
     for (int i = 0; i < dotCount; i++) {
@@ -111,7 +104,10 @@ void checkGitHubUpdate() {
   
   if (httpCode == HTTP_CODE_OK) { 
     String payload = http.getString();
+    
+    // ปรับการหาตำแหน่งให้เป็นอิสระต่อกัน (ไม่โดนบังคับลำดับ)
     int verKeyPos = payload.indexOf("\"version\":");
+    int buildKeyPos = payload.indexOf("\"Build\":");
     
     if (verKeyPos != -1) {
       int firstQuote = payload.indexOf("\"", verKeyPos + 10); 
@@ -119,7 +115,6 @@ void checkGitHubUpdate() {
       String newVerStr = payload.substring(firstQuote + 1, secondQuote);
       float newVersion = newVerStr.toFloat();
    
-      int buildKeyPos = payload.indexOf("\"Build\":");
       String buildDate = "N/A";
       if (buildKeyPos != -1) {
         int bFirstQuote = payload.indexOf("\"", buildKeyPos + 8);
@@ -134,7 +129,6 @@ void checkGitHubUpdate() {
       if (newVersion > currentVersion) {
         Serial.println("[OTA] >>> Found New Fw. <<<");
         
-        // --- ส่วนที่ปรับปรุง: การแสดงผล LCD ก่อนเริ่ม Update ---
         lcd.clear();
         lcd.setCursor(0, 0); lcd.print("    ----OTA----");
         lcd.setCursor(0, 1); lcd.print("Ver.:" + String(newVersion, 1));
@@ -150,8 +144,6 @@ void checkGitHubUpdate() {
           Serial.printf("[OTA] Update Error (%d): %s\n", httpUpdate.getLastError(), httpUpdate.getLastErrorString().c_str());
           lcd.setCursor(0, 3); lcd.print("Update Failed!      ");
         }
-      } else {
-        Serial.println("[OTA] Fw. is up to date.");
       }
     }
   }
@@ -169,7 +161,6 @@ void startWiFiManager() {
   lcd.setCursor(0, 1); lcd.print("1.Connect WiFi Name");
   lcd.setCursor(0, 2); lcd.print(">> " + fullHostname); 
 
-  // กระพริบ IP 
   for(int i=0; i<3; i++) {
     lcd.setCursor(0, 3); lcd.print("2.Open: 192.168.4.1"); delay(500);
     lcd.setCursor(8, 3); lcd.print("           "); delay(500);
@@ -199,17 +190,14 @@ void setup() {
   pinMode(ledPin, OUTPUT); 
   pinMode(configButton, INPUT_PULLUP);
 
-  // --- จุดที่แก้ไข: กระตุ้นการอ่านค่า WiFi จาก Memory ---
   WiFi.mode(WIFI_STA);
-  WiFi.begin(); // เริ่มการเชื่อมต่อเบื้องต้นเพื่อโหลดค่า SSID เดิมขึ้นมา
+  WiFi.begin(); 
   
-  // รอสักครู่ให้ Driver โหลดค่า SSID สำเร็จก่อนดึงมาแสดงผล
   int retry = 0;
   while (WiFi.SSID() == "" && retry < 10) { 
     delay(100); 
     retry++; 
   }
-  // ------------------------------------------------
 
   macAddrStr = getEfuseMac();
   uint64_t mac = ESP.getEfuseMac();
@@ -277,7 +265,6 @@ void loop() {
   float temperatureC = sensors.getTempCByIndex(0);
   unsigned long currentMillis = millis();
 
-  // ส่งค่าไป Blynk ทุก 2 วินาที
   if (isOnline && (currentMillis - blynkMillis >= 2000)) {
     blynkMillis = currentMillis;
     if (Blynk.connected() && myID > 0) {
@@ -286,12 +273,10 @@ void loop() {
     }
   }
 
-  // ไฟ HeartBeat
   if (currentMillis - blinkMillis >= 500) {
     blinkMillis = currentMillis; blinkState = !blinkState; digitalWrite(LedHeartBeat, blinkState); 
   }
 
-  // สลับหน้าจอ LCD
   unsigned long displayInterval = (displayPage == 1) ? 15000 : 3000;
   if (currentMillis - previousMillis >= displayInterval) {
     previousMillis = currentMillis; 
