@@ -19,7 +19,7 @@
 // หมายเหตุ: นำ esp_task_wdt.h ออกเนื่องจากไม่ได้ใช้ระบบ Config WDT แบบเต็มตัว
 
 // --- [ ส่วนที่ 1: การตั้งค่าบอร์ด ] ---
-String boardList[] = {"4948", "4A90", "59EC", "G7H8", "I9J0", "K1L2", "M3N4", "O5P6"};
+String boardList[] = {"4948", "4A90", "59EC", "650C", "D498", "F0FC", "7088", "F7F8"};
 int myID = 0; 
 String myMacSuffix = ""; 
 char auth[] = "yXTSHdXVnNyDihE9zrzxQGE2JosxAQaa";
